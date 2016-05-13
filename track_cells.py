@@ -14,11 +14,11 @@ from math import sqrt
 import itertools
 
 from skimage.morphology import disk
-from skimage.filters import threshold_otsu
+from skimage.filters import sobel
 from skimage.util import img_as_ubyte
 from skimage.color import rgb2gray
-from skimage.measure import label
-from skimage.segmentation import clear_border
+from skimage.measure import label, regionprops
+from skimage.segmentation import relabel_sequential
 from skimage.color import label2rgb
 from skimage.morphology import closing, skeletonize, reconstruction
 
@@ -30,11 +30,8 @@ from scipy import ndimage, sparse
 
 # Global parameters
 
-BLUR_RADIUS = 1.2
 
-
-
-def analyze_image(filename, output_dir='output', save_figs=False):
+def segment_basic(filename, output_dir='output', temp_dir='temp_', save_figs=False):
     """Get basic information about image"""
 
     print("Loading...")
@@ -43,7 +40,7 @@ def analyze_image(filename, output_dir='output', save_figs=False):
     filebase = os.path.splitext(os.path.basename(filename))[0]
 
     if save_figs:
-        tiff.imsave(joinpath(output_dir, ''.join([filebase, '_', str(step),  '_orig.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_orig.tif'])), img)
 
     # Cropping image will make everything after this faster
     #   Make sure this is appropriate for every frame
@@ -55,7 +52,7 @@ def analyze_image(filename, output_dir='output', save_figs=False):
 
     if save_figs:
         # also save original image with box showing kept region
-        tiff.imsave(joinpath(output_dir, ''.join([filebase, '_', str(step),  '_cropped.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_cropped.tif'])), img)
 
     # Convert RGB image to greyscale and convert back to 8-bit uint
     # Ignore precision loss warning
@@ -64,12 +61,14 @@ def analyze_image(filename, output_dir='output', save_figs=False):
     img = img_as_ubyte(rgb2gray(img))
 
     if save_figs:
-        tiff.imsave(joinpath(output_dir, ''.join([filebase, '_', str(step),  '_greyscale.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_greyscale.tif'])), img)
 
     # Threshold using custom threshold
     #   There's artifacts in the images (should fix the image segmentation output so this doesn't happen) which need to be fixed.
     #   Set a custom, very low threshold instead of trying to automatically calculate one.
     #   Need to maintain connectivity w/o introducing little dots
+    #   Also need to be careful not to join together cells that are close together - such as right after division
+    #       This seemed to do OK on the examples, though
     # Alternatively use adaptive thresholding
     print('Thresholding...')
     step += 1
@@ -77,42 +76,50 @@ def analyze_image(filename, output_dir='output', save_figs=False):
     img = img_as_ubyte(img > THRESHOLD)
 
     if save_figs:
-        tiff.imsave(joinpath(output_dir, ''.join([filebase, '_', str(step),  '_thresholded.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_thresholded.tif'])), img)
 
-    # Note: this step isn't necessary - just label the regions bigger than a cutoff size
-    # Clean up little dots from thresholding
-    # print('Removing dots...')
-    # step += 1
-    # DOTS_REMOVE_RADIUS = 2.5
-    # selem = disk(DOTS_REMOVE_RADIUS)
-    # img = closing(img, selem)
-    #
-    # if save_figs:
-    #     tiff.imsave(joinpath(output_dir, ''.join([filebase, '_', str(step),  '_dots_removed.tif'])), img)
-
-
-    # Note/TODO: there may be a built-in function to read images like these and get labeled regions
+    # Label regions
     #   http://scikit-image.org/docs/dev/auto_examples/plot_label.html
     #   http://scikit-image.org/docs/dev/user_guide/tutorial_segmentation.html
     #   https://docs.scipy.org/doc/scipy-0.16.0/reference/generated/scipy.ndimage.measurements.label.html
-    # Only keep labels with > some size; count sizes and remove smaller counts
-    # Allow parts separated by diagonal to belong to 1 region: s = generate_binary_structure(2,2)
     #   http://scikit-image.org/docs/dev/auto_examples/segmentation/plot_join_segmentations.html#example-segmentation-plot-join-segmentations-py
     #   http://scikit-image.org/docs/dev/auto_examples/segmentation/plot_watershed.html#example-segmentation-plot-watershed-py
+    # http://cmm.ensmp.fr/~beucher/wtshed.html
+    # Note/TODO: Will probably need watershed and more fancy methods for the real segmentation
     print("Labeling regions...")
     step += 1
 
-    cleared = img.copy()
-    clear_border(cleared)
-    label_img = label(img)
-    borders = np.logical_xor(img, cleared)
-    label_img[borders] = -1
-    image_label_overlay = label2rgb(label_img, image=img)
+    label_img, n_labels = label(img, connectivity=2, return_num=True)
+    regions = regionprops(label_img)
+
+    # Keep the labeled regions bigger than some cutoff area
+    #   The larger regions are cells, the smaller regions are noise
+    REGION_AREA_CUTOFF = 10  # px
+    kept_regions = []
+    kept_labels = []
+    for region in regions:
+        if region.area > REGION_AREA_CUTOFF:
+            kept_regions.append(region)
+            kept_labels.append(region.label)
+
+    label_img_cleaned = label_img
+    label_img_cleaned[np.in1d(label_img, kept_labels, invert=True).reshape(label_img.shape)] = 0  # Make a mask of all positions not in kept_labels
+    label_img_cleaned, _, _ = relabel_sequential(label_img_cleaned)
+
+    # Get image with only the cells
+    img = img_as_ubyte(label_img_cleaned > 0)
+
+    # Display regions with unique colors
+    label_img_overlay = label2rgb(label_img_cleaned, image=img)
 
     if save_figs:
-        tiff.imsave(joinpath(output_dir, ''.join([filebase, '_', str(step),  '_labeled.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step), '_labeled.tif'])),
+                    img_as_ubyte(img))
+        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step), '_labeled_overlay.tif'])),
+                    img_as_ubyte(label_img_overlay))
 
 
+    # TODO:Output stats for regions
     return 0
 
 
@@ -153,9 +160,10 @@ if __name__ == "__main__":
             try:
                 img.seek(i)
                 print('Processing page %d'%(i))
-                pagename = joinpath(temp_dir, 'page_%d.tif'%(i,))
+                shortfile = file.split('.')[0]  # remove file extension(s)
+                pagename = joinpath(temp_dir, shortfile + '_page_%d.tif'%(i,))
                 img.save(pagename)
-                d = analyze_image(pagename, output_dir=output_dir, save_figs=save_figs)
+                d = segment_basic(pagename, output_dir=output_dir, temp_dir=temp_dir, save_figs=save_figs)
                 i += 1
             except EOFError:
                 break
