@@ -3,17 +3,29 @@ import json
 from math import sqrt
 
 
-def distance(this, prev):
-    """Get Euclidean distance between this position (x,y) and previous positions [(x,y), (x,y), ...]"""
+def get_dist(point1, point2):
+    """Get Euclidean distance between two points, each a tuple/list of the form (x,y)"""
+    return sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+
+
+def get_all_dists(this_point, other_points):
+    """Get list of distances between this_point (x,y) and list of other_points [(x,y), (x,y), ...]"""
     dists = []
-    for pos in prev:
-        dists.append(sqrt((this[0] - pos[0])**2 + (this[1] - pos[1])**2))
+    for other_point in other_points:
+        dists.append(get_dist(this_point, other_point))
     return dists
+
+
+def get_shortest_dist(this_point, other_points):
+    """Get shortest (distance, index of other point) from this_point (x,y) and list of other_points [(x,y), (x,y), ...]"""
+    dists = get_all_dists(this_point, other_points)
+    min_dist, other_point_ind = min((val, idx) for (idx, val) in enumerate(dists))
+    return min_dist, other_point_ind
 
 
 def track_cells_basic(segmented_stats):
     """Build cell trajectories. Basically add a field to each cell inside segmented_stats that says what its previous
-    label was."""
+    label was. Cells in the first frame have dummy pre_label's that point to label 0."""
 
     # Make dummy previous components for 1st frame
     # These get updated at the end of each iteration
@@ -23,8 +35,7 @@ def track_cells_basic(segmented_stats):
     for frame in segmented_stats:
 
         for cell in frame['cells']:
-            dists = distance(cell['centroid'], prev_centroids)
-            min_dist, prev_label_ind = min((val, idx) for (idx, val) in enumerate(dists))
+            min_dist, prev_label_ind = get_shortest_dist(cell['centroid'], prev_centroids)
             cell['prev_label'] = prev_labels[prev_label_ind]
 
         prev_labels = []
