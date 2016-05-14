@@ -1,46 +1,39 @@
 # Main script that runs everything
 
-import sys
 import os
 from os.path import join as joinpath
+from os.path import isfile
 import argparse
 
 from PIL import Image
 
 import numpy as np
-
-from math import sqrt
+from scipy import ndimage, sparse
 
 import itertools
 
-from skimage.morphology import disk
-from skimage.filters import sobel
 from skimage.util import img_as_ubyte
 from skimage.color import rgb2gray
 from skimage.measure import label, regionprops
 from skimage.segmentation import relabel_sequential
 from skimage.color import label2rgb
-from skimage.morphology import closing, skeletonize, reconstruction
 
 import matplotlib.pyplot as plt
 
 import tifffile as tiff
 
-from scipy import ndimage, sparse
+import re
+import json
+from NumpyJSONEncoder import NumpyJSONEncoder
 
-# Global parameters
 
+def segment_basic(img, name, output_dir='output', temp_dir='temp_', save_figs=False):
+    """Segment most preprocessed image and return basic stats for detected regions/cells"""
 
-def segment_basic(filename, output_dir='output', temp_dir='temp_', save_figs=False):
-    """Get basic information about image"""
-
-    print("Loading...")
     step = 1 # Counter variable for step to make sure all intermediate outputs are in order
-    img = plt.imread(filename)
-    filebase = os.path.splitext(os.path.basename(filename))[0]
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_orig.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_orig.tif'])), img)
 
     # Cropping image will make everything after this faster
     #   Make sure this is appropriate for every frame
@@ -52,7 +45,7 @@ def segment_basic(filename, output_dir='output', temp_dir='temp_', save_figs=Fal
 
     if save_figs:
         # also save original image with box showing kept region
-        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_cropped.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_cropped.tif'])), img)
 
     # Convert RGB image to greyscale and convert back to 8-bit uint
     # Ignore precision loss warning
@@ -61,7 +54,7 @@ def segment_basic(filename, output_dir='output', temp_dir='temp_', save_figs=Fal
     img = img_as_ubyte(rgb2gray(img))
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_greyscale.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_greyscale.tif'])), img)
 
     # Threshold using custom threshold
     #   There's artifacts in the images (should fix the image segmentation output so this doesn't happen) which need to be fixed.
@@ -76,7 +69,7 @@ def segment_basic(filename, output_dir='output', temp_dir='temp_', save_figs=Fal
     img = img_as_ubyte(img > THRESHOLD)
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step),  '_thresholded.tif'])), img)
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_thresholded.tif'])), img)
 
     # Label regions
     #   http://scikit-image.org/docs/dev/auto_examples/plot_label.html
@@ -102,26 +95,35 @@ def segment_basic(filename, output_dir='output', temp_dir='temp_', save_figs=Fal
             kept_regions.append(region)
             kept_labels.append(region.label)
 
-    label_img_cleaned = label_img
-    label_img_cleaned[np.in1d(label_img, kept_labels, invert=True).reshape(label_img.shape)] = 0  # Make a mask of all positions not in kept_labels
-    label_img_cleaned, _, _ = relabel_sequential(label_img_cleaned)
+    # label_img_cleaned = label_img
+    label_img[np.in1d(label_img, kept_labels, invert=True).reshape(label_img.shape)] = 0  # Make a mask of all positions not in kept_labels
+    label_img, _, _ = relabel_sequential(label_img)
+
+    regions = regionprops(label_img)
 
     # Get image with only the cells
-    img = img_as_ubyte(label_img_cleaned > 0)
+    img = img_as_ubyte(label_img > 0)
 
     # Display regions with unique colors
-    label_img_overlay = label2rgb(label_img_cleaned, image=img)
+    label_img_overlay = label2rgb(label_img, image=img)
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step), '_labeled.tif'])),
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled.tif'])),
                     img_as_ubyte(img))
-        tiff.imsave(joinpath(temp_dir, ''.join([filebase, '_', str(step), '_labeled_overlay.tif'])),
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled_overlay.tif'])),
                     img_as_ubyte(label_img_overlay))
+        # TODO: output additional fig with number of region overlaid - use matplotlib or similar
 
+    # Return just the minimum stats needed for cell tracking
+    results = []
+    for region in regions:
+        stats = {}
+        stats['label'] = region.label
+        stats['centroid'] = region.centroid
+        stats['area'] = region.area
+        results.append(stats)
 
-    # TODO:Output stats for regions
-    return 0
-
+    return results
 
 
 if __name__ == "__main__":
@@ -133,8 +135,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # save_figs = args.save_figs
-    save_figs = True  # Debugging
+    save_figs = args.save_figs
     input_dir = args.input
     output_dir = args.output
     temp_dir = args.temp
@@ -149,23 +150,38 @@ if __name__ == "__main__":
     else:
         os.makedirs(temp_dir)
 
-    files = os.listdir(input_dir)
+    # (Re-) segment images into cells
+    segmented_stats = []
+    files = [f for f in os.listdir(input_dir) if isfile(joinpath(input_dir, f))]  # get the files, excluding directories
     for file in files:
         filename = joinpath(input_dir, file)
         print("Processing file %s"%(filename,))
 
-        img = Image.open(filename)
-        i = 0
-        while True:
-            try:
-                img.seek(i)
-                print('Processing page %d'%(i))
-                shortfile = file.split('.')[0]  # remove file extension(s)
-                pagename = joinpath(temp_dir, shortfile + '_page_%d.tif'%(i,))
-                img.save(pagename)
-                d = segment_basic(pagename, output_dir=output_dir, temp_dir=temp_dir, save_figs=save_figs)
+        with tiff.TiffFile(filename) as tif:
+            i = 0
+            for page in tif:
                 i += 1
-            except EOFError:
-                break
+
+                img = page.asarray()
+                name = joinpath(file.split('.')[0] + '_page_%d'%(i,))
+                print('Processing image %s' % (name,))
+                cells = segment_basic(img, name, output_dir=output_dir, temp_dir=temp_dir, save_figs=save_figs)
+
+                tokens = re.findall('.+Time(\d+)', name)
+                time = int(tokens[0])  # hopefully this works...
+
+                stats = {'time': time, 'cells': cells}
+
+                segmented_stats.append(stats)
+
+    # Track cells
+    # TODO, or put this wholly in another file
+
+    # Output results
+    print('Outputting segmented results in JSON format')
+    # segmented_results = json.dumps(segmented_stats)
+    segmented_results_file = joinpath(output_dir, 'segmented_results.txt')
+    with open(segmented_results_file, 'w') as f:
+        json.dump(segmented_stats, f, cls=NumpyJSONEncoder, indent=4, sort_keys=True)
 
     print('done.')
