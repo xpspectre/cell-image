@@ -179,7 +179,6 @@ if __name__ == "__main__":
 
     # Output results
     print('Outputting segmented results in JSON format')
-    # segmented_results = json.dumps(segmented_stats)
     segmented_results_file = joinpath(output_dir, 'segmented_results.txt')
     with open(segmented_results_file, 'w') as f:
         json.dump(segmented_stats, f, cls=NumpyJSONEncoder, indent=4, sort_keys=True)
