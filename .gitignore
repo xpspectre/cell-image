@@ -1,9 +1,8 @@
 # Project-specific gitignore
 *_/
 images/
-images_all/
 output/
-temp_/
+temp/
 
 # More Pycharm stuff to ignore
 .idea/

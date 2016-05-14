@@ -1,16 +1,12 @@
-# Main script that runs everything
+# Simple image segmenting
+# TODO: clean this up by separating out options and moving them to another file
 
 import os
 from os.path import join as joinpath
-from os.path import isfile
-import argparse
 
 from PIL import Image
 
 import numpy as np
-from scipy import ndimage, sparse
-
-import itertools
 
 from skimage.util import img_as_ubyte
 from skimage.color import rgb2gray
@@ -26,8 +22,10 @@ import re
 import json
 from NumpyJSONEncoder import NumpyJSONEncoder
 
+from image_loader import image_loader
 
-def segment_basic(img, name, output_dir='output', temp_dir='temp_', save_figs=False):
+
+def segment_basic(img, name, output_dir='output', temp_dir='temp', save_figs=False):
     """Segment most preprocessed image and return basic stats for detected regions/cells"""
 
     step = 1 # Counter variable for step to make sure all intermediate outputs are in order
@@ -115,72 +113,45 @@ def segment_basic(img, name, output_dir='output', temp_dir='temp_', save_figs=Fa
         # TODO: output additional fig with number of region overlaid - use matplotlib or similar
 
     # Return just the minimum stats needed for cell tracking
-    results = []
+    cells = []
     for region in regions:
-        stats = {}
-        stats['label'] = region.label
-        stats['centroid'] = region.centroid
-        stats['area'] = region.area
-        results.append(stats)
+        cell = {'label': region.label,
+                'centroid': region.centroid,
+                'area': region.area}
+        cells.append(cell)
 
-    return results
+    return cells
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Automated root length calculator')
-    parser.add_argument('-s', '--save-figs', help='Include this flag to save intermediate figs to output directory. Must be first flag.', action='store_true')
-    parser.add_argument('-i', '--input', help='Input images directory', required=False, default='images')
-    parser.add_argument('-o','--output',  help='Output directory', required=False, default='output')
-    parser.add_argument('-t','--temp',  help='Temporary directory for intermediates', required=False, default='temp_')
+    save_figs = False  # True when developing the pipeline
+    input_dir = 'images'
+    output_dir = 'output'
+    temp_dir = 'temp'
 
-    args = parser.parse_args()
-
-    save_figs = args.save_figs
-    input_dir = args.input
-    output_dir = args.output
-    temp_dir = args.temp
-
-    if os.path.exists(output_dir):
-        print('Warning: Directory %s already exists. Outputs with the same name will overwrite existing files.'%(output_dir,))
-    else:
+    if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    if os.path.exists(temp_dir):
-        print('Warning: Temporary directory %s already exists. It''s contents will be overwritten.'%(temp_dir,))
-    else:
+    if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
 
     # (Re-) segment images into cells
-    segmented_stats = []
-    files = [f for f in os.listdir(input_dir) if isfile(joinpath(input_dir, f))]  # get the files, excluding directories
-    for file in files:
-        filename = joinpath(input_dir, file)
-        print("Processing file %s"%(filename,))
+        segmented_results = []
+    for img, name in image_loader(input_dir):
+        print('Processing image %s' % (name,))
+        cells = segment_basic(img, name, output_dir=output_dir, temp_dir=temp_dir, save_figs=save_figs)
 
-        with tiff.TiffFile(filename) as tif:
-            i = 0
-            for page in tif:
-                i += 1
+        tokens = re.findall('.+Time(\d+)', name)
+        time = int(tokens[0])  # hopefully this works...
 
-                img = page.asarray()
-                name = joinpath(file.split('.')[0] + '_page_%d'%(i,))
-                print('Processing image %s' % (name,))
-                cells = segment_basic(img, name, output_dir=output_dir, temp_dir=temp_dir, save_figs=save_figs)
+        stats = {'time': time, 'cells': cells}
 
-                tokens = re.findall('.+Time(\d+)', name)
-                time = int(tokens[0])  # hopefully this works...
-
-                stats = {'time': time, 'cells': cells}
-
-                segmented_stats.append(stats)
-
-    # Track cells
-    # TODO, or put this wholly in another file
+        segmented_results.append(stats)
 
     # Output results
     print('Outputting segmented results in JSON format')
     segmented_results_file = joinpath(output_dir, 'segmented_results.txt')
     with open(segmented_results_file, 'w') as f:
-        json.dump(segmented_stats, f, cls=NumpyJSONEncoder, indent=4, sort_keys=True)
+        json.dump(segmented_results, f, cls=NumpyJSONEncoder, indent=4, sort_keys=True)
 
     print('done.')
