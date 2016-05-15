@@ -24,5 +24,7 @@ Helper scripts/libraries for pipeline steps are ``segment_cells.py`` and ``track
 
 ## Notes:
    - Received images for cell tracking have been slightly postprocessed after segmentation and have some artifacts (are those from jpg?). Make sure the whole integrated workflow doesn't do this.
+   - The CellProfiler sample pipeline output final images as JPEG. Don't want to do that - make sure you use lossless compression for everything.
    - Load tiffs source: https://stackoverflow.com/questions/7569553/working-with-tiffs-import-export-in-python-using-numpy
    - Warning: intermediate files may be very big uncompressed TIFFs
+   - Cell tracking is much faster than CellProfiler (at least for CellProfiler on Windows). Aside from slightly cleaning up the already segmented images (that got saved as JPEGs), it's instant.
