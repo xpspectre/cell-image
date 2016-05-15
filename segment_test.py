@@ -28,6 +28,7 @@ from os.path import join as joinpath
 from PIL import Image
 
 import numpy as np
+from scipy.ndimage import binary_fill_holes
 
 from skimage.util import img_as_ubyte
 from skimage.color import rgb2gray
@@ -148,10 +149,11 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     #   This step is sensitive/fine-tuned
     #   A bunch of long, thin cells that may or may not be linked is hard to handle
     #   One requirement is that when cells split, they can't merge afterwards. Requires online cell tracking.
-    # Another watershedding step
+    # Another watershedding step?
     #   Make markers by distances from edge - identifies centers of blobs/cells - this works for round cells (and can
     #       split touching cells) but not as well for elongated cells, where it's hard to tell the split.
-    #
+    # May try reconstruction:erosion+propagation (https://docs.scipy.org/doc/scipy-0.16.0/reference/generated/scipy.ndimage.morphology.binary_propagation.html#scipy.ndimage.morphology.binary_propagation)
+    #   Les destructive than adjunction:opening
     # print('Splitting cells')
     #
     # if save_figs:
@@ -166,13 +168,50 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     if save_figs:
         tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_small_objects_removed.tif'])), img)
 
-    # DEBUG: still output final result when not saving figs
-    if not save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_segmented.tif'])), img)
+    # Fill small holes
+    print("Filling small holes")
+    step += 1
+    img = img_as_ubyte(binary_fill_holes(img))
+
+    if save_figs:
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_holes_filled.tif'])), img)
 
     # Label regions
+    print("Labeling regions...")
+    step += 1
 
-    return 0
+    label_img, n_labels = label(img, connectivity=2, return_num=True)
+    regions = regionprops(label_img)
+
+    # Get image with only the cells
+    img = img_as_ubyte(label_img > 0)
+
+    # Display regions with unique colors
+    label_img_overlay = label2rgb(label_img, image=img)
+    label_img_overlay = img_as_ubyte(label_img_overlay)
+    label_img_overlay[img < 1] = 0  # make background black
+
+    if save_figs:
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled.tif'])),
+                    img_as_ubyte(img))
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled_overlay.tif'])),
+                    label_img_overlay)
+
+    # DEBUG: still output final result when not saving figs
+    if not save_figs:
+        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_segmented.tif'])),
+                    img_as_ubyte(label_img_overlay))
+
+    # Return just the minimum stats needed for cell tracking
+    cells = []
+    for region in regions:
+        cell = {'label': region.label,
+                'centroid': region.centroid,
+                'area': region.area}
+        cells.append(cell)
+
+    return cells
+
 
 if __name__ == "__main__":
     save_figs = False  # True when developing the pipeline
@@ -201,7 +240,7 @@ if __name__ == "__main__":
 
     # Output results
     print('Outputting segmented results in JSON format')
-    segmented_results_file = joinpath(output_dir, 'segmented_results.txt')
+    segmented_results_file = joinpath(output_dir, 'segmented_results_test.txt')
     with open(segmented_results_file, 'w') as f:
         json.dump(segmented_results, f, cls=NumpyJSONEncoder, indent=4, sort_keys=True)
 
