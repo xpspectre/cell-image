@@ -22,6 +22,9 @@ def image_loader(input_dir):
                 i += 1
 
                 img = page.asarray()
-                name = joinpath(file.split('.')[0] + '_page_%d'%(i,))
+                if len(tif.pages) == 1: # Handle usual case of single-page TIFF w/o page number in name
+                    name = file.split('.')[0]
+                else:
+                    name = file.split('.')[0] + '_page_%d'%(i,)
 
                 yield (img, name)

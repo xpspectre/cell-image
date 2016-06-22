@@ -25,7 +25,7 @@
 import os
 from os.path import join as joinpath
 
-from PIL import Image
+from save_tiff import save_tiff
 
 import numpy as np
 from scipy.ndimage import binary_fill_holes
@@ -53,27 +53,28 @@ from image_loader import image_loader
 def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=False):
     """Test segmentation on harder images from earlier in the pipeline."""
 
-    step = 1 # Counter variable for step to make sure all intermediate outputs are in order
+    step = 0 # Counter variable for step to make sure all intermediate outputs are in order
 
-    if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_orig.tif'])), img)
+    # PIL can't work with 16-bit TIFF images
+    # if save_figs:
+    #     tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_orig.tif'])), img)
 
     # Everything appears as black in the initial image - it was just rescaled to
     print("Rescaling intensity...")
     step += 1
-    img = rescale_intensity(img)
+    img = img_as_ubyte(rescale_intensity(img))
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_rescaled.tif'])), img)
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step),  '_rescaled.tif'])), img)
 
     # Convert RGB image to greyscale and convert back to 8-bit uint
     # Ignore precision loss warning
     print("Converting to greyscale...")
     step += 1
-    img = img_as_ubyte(rgb2gray(img))
+    img = rgb2gray(img)
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_greyscale.tif'])), img)
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step),  '_greyscale.tif'])), img)
 
     # # Basic thresholding for segmentation
     # #   This probably doesn't work well enough because of:
@@ -113,7 +114,7 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     markers[img > MARKER_HI_THRESHOLD] = 2
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_markers.tif'])), img_as_ubyte(rescale_intensity(markers)))
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step), '_markers.tif'])), img_as_ubyte(rescale_intensity(markers)))
 
     # # Get edges
     # print('Getting edges using gradient methods')
@@ -130,12 +131,12 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     candidate_regions[img > MARKER_LO_THRESHOLD] = 1
     candidate_regions = rescale_intensity(candidate_regions)
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_candidate_regions.tif'])), rescale_intensity(candidate_regions))
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step), '_candidate_regions.tif'])), rescale_intensity(candidate_regions))
 
     print('Getting edges of candidate regions')
     elevation_map = sobel(candidate_regions)
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_elevation_map.tif'])), img_as_ubyte(elevation_map))
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step), '_elevation_map.tif'])), img_as_ubyte(elevation_map))
 
     # Do watershed transform
     #   Warning: expensive
@@ -143,7 +144,7 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     img = rescale_intensity(watershed(elevation_map, markers))
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_watershed.tif'])), img)
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step), '_watershed.tif'])), img)
 
     # Split close cells
     #   This step is sensitive/fine-tuned
@@ -166,7 +167,7 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     img = img_as_ubyte(remove_small_objects(img > 100, min_size=OBJECT_SIZE_THRESHOLD))  # run remove_small_objects on a boolean matrix
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_small_objects_removed.tif'])), img)
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step),  '_small_objects_removed.tif'])), img)
 
     # Fill small holes
     print("Filling small holes")
@@ -174,7 +175,7 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     img = img_as_ubyte(binary_fill_holes(img))
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step),  '_holes_filled.tif'])), img)
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step),  '_holes_filled.tif'])), img)
 
     # Label regions
     print("Labeling regions...")
@@ -192,14 +193,14 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
     label_img_overlay[img < 1] = 0  # make background black
 
     if save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled.tif'])),
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled.tif'])),
                     img_as_ubyte(img))
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled_overlay.tif'])),
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step), '_labeled_overlay.tif'])),
                     label_img_overlay)
 
     # DEBUG: still output final result when not saving figs
     if not save_figs:
-        tiff.imsave(joinpath(temp_dir, ''.join([name, '_', str(step), '_segmented.tif'])),
+        save_tiff(joinpath(temp_dir, ''.join([name, '_', str(step), '_segmented.tif'])),
                     img_as_ubyte(label_img_overlay))
 
     # Return just the minimum stats needed for cell tracking
@@ -214,7 +215,7 @@ def segment_test(img, name, output_dir='output', temp_dir='temp', save_figs=Fals
 
 
 if __name__ == "__main__":
-    save_figs = False  # True when developing the pipeline
+    save_figs = True  # True when developing the pipeline
     input_dir = 'images'
     output_dir = 'output'
     temp_dir = 'temp'
