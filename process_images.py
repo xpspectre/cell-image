@@ -27,7 +27,7 @@ save_figs = True
 # Load instructions for preprocessing panels
 # Noisy panels
 #   The 3rd col of this csv file is a tuple of tuples
-noisy_panels_filename = r'C:\Users\xpspectre\workspace\cell-image\extra_inputs\noisy_panels.csv'
+noisy_panels_filename = 'extra_inputs/noisy_panels.csv'
 noisy_panels = {}
 with open(noisy_panels_filename, newline='') as noisy_panels_file:
     reader = csv.reader(noisy_panels_file, delimiter=',', quotechar='"')
@@ -43,7 +43,7 @@ with open(noisy_panels_filename, newline='') as noisy_panels_file:
 # Irregularly shaped panels
 #   Assume 1 cutout region/image
 #   Points specify polygon in original (uncropped) image
-cutout_filename = r'C:\Users\xpspectre\workspace\cell-image\extra_inputs\cutout_regions.csv'
+cutout_filename = 'extra_inputs/cutout_regions.csv'
 cutout_regions = {}
 with open(cutout_filename, newline='') as cutout_file:
     reader = csv.reader(cutout_file, delimiter=',', quotechar='"')
@@ -54,6 +54,17 @@ with open(cutout_filename, newline='') as cutout_file:
         points = ast.literal_eval(row[2])
         for i in range(start, end+1):
             cutout_regions[i] = points
+
+# Load approximate cell starting positions (and count)
+#   Positions are for original (uncropped) image
+starting_filename = 'extra_inputs/starting_cells.csv'
+starting_positions = []
+with open(starting_filename, newline='') as starting_file:
+    reader = csv.reader(starting_file, delimiter=',', quotechar='"')
+    next(reader)  # ignore 1st line with column headers
+    for row in reader:
+        for pos in row:
+            starting_positions.append(ast.literal_eval(pos))
 
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
