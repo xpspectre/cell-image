@@ -18,7 +18,7 @@ class CellWalker:
         Cell starts off stationary
 
         Args:
-            x (4-tuple of doubles): Starting state (x, y, xdot, ydot)
+            x (4-tuple of doubles): Starting state (x, xdot, y, ydot)
         """
 
         # Current time, mode, and state
@@ -32,7 +32,7 @@ class CellWalker:
         self.xs = [self.x]
 
         # Internal model components
-        self.noise = 1  # std dev
+        self.noise = 0.1  # std dev
         # The cell does 1 of 2 things: move forward with some bearing and velocity, or is stopped, and turning (changing bearing)
         # self.Tij = np.array([[0.2, 0.4, 0.4],
         #                      [0.1, 0.8, 0.1],
@@ -70,7 +70,7 @@ class CellWalker:
         """Get noisy position measurements from state"""
         x = self.get_state(t)
         return (x[0] + randnorm(0, self.noise),
-                x[1] + randnorm(0, self.noise))
+                x[2] + randnorm(0, self.noise))
 
     def advance(self):
         """Advance the cell's position"""
@@ -86,19 +86,19 @@ class CellWalker:
         """Pick next mode randomly according to current mode and transition matrix T_{i->j}"""
         Ti = self.Tij[self.mode,:]
         Ti_cum = np.cumsum(Ti)
-        x = randuniform(0,1)
+        x = randuniform(0, 1)
         return np.argmax(x<Ti_cum)
 
     def next_state(self):
         """Get next state according to current mode and state"""
         if self.mode == 0:  # Const pos
-            return self.x[0], self.x[1], 0, 0
+            return self.x[0], 0, self.x[2], 0
         elif self.mode == 1:  # Const vel
-            return self.x[0] + self.x[2] * self.dt, self.x[1] + self.x[3] * self.dt, self.x[2], self.x[3]
+            return self.x[0] + self.x[1] * self.dt, self.x[1], self.x[2] + self.x[3] * self.dt, self.x[3]
         elif self.mode == 2:  # Const pos + rotation
             speed = randuniform(0, 1)
             bearing = randuniform(0, 2 * PI)
-            return self.x[0], self.x[1], speed * math.cos(bearing), speed * math.sin(bearing)
+            return self.x[0], speed * math.cos(bearing), self.x[2], speed * math.sin(bearing)
         else:
             raise ValueError('State must be an integer 0, 1, or 2')
 
@@ -124,7 +124,7 @@ if __name__ == "__main__":
         xdot = speed*math.cos(bearing)
         ydot = speed*math.sin(bearing)
 
-        cells.append(CellWalker((x,y,xdot,ydot)))
+        cells.append(CellWalker((x,xdot,y,ydot)))
         print('Cell with starting position ({x:.3f},{y:.3f}) and velocity ({xdot:.3f},{ydot:.3f}) created'.format(
             x=x, y=y, xdot=xdot, ydot=ydot))
 
@@ -137,7 +137,7 @@ if __name__ == "__main__":
         maxt = cell.t  # makes sure the later commands end in exactly the same place
 
         # Plot exact states as advanced
-        xs, ys, xdots, ydots = zip(*cell.xs)  # Unzips list of pairs into 2 lists
+        xs, xdots, ys, ydots = zip(*cell.xs)  # Unzips list of pairs into 2 lists
         f1 = plt.figure()
         plt.scatter(xs, ys)
         plt.plot(xs, ys)  # connect points with lines
@@ -156,7 +156,7 @@ if __name__ == "__main__":
         for t in times:
             positions.append(cell.get_state(t))
 
-        xs, ys, xdots, ydots = zip(*positions)
+        xs, xdots, ys, ydots = zip(*positions)
         f2 = plt.figure()
         plt.scatter(xs, ys)
         plt.plot(xs, ys)
